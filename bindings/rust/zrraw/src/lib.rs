@@ -3,6 +3,7 @@ use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
 use std::ffi::CStr;
 use thiserror::Error;
 use zrraw_sys::*;
+use libloading::{Library, Symbol}; 
 
 #[derive(Error, Debug)]
 pub enum ZrRawError {
@@ -169,36 +170,74 @@ impl From<ProcessingParams> for ZrRawProcessParams {
     }
 }
 
-// --- NEW: This struct holds the combined result from the library ---
 #[derive(Debug)]
 pub struct ProcessedRawFile {
     pub image: DynamicImage,
     pub metadata: RawMetadata,
 }
 
-/// Main ZrRaw processor
-pub struct ZrRaw;
 
+type DetectFormatFunc = unsafe extern "C" fn(*const u8, usize, *mut ZrRawFormat) -> i32;
+type ExtractMetadataFunc = unsafe extern "C" fn(*const u8, usize, *mut ZrRawMetadata) -> i32;
+type ProcessFileFunc = unsafe extern "C" fn(
+    *const u8, usize, *const ZrRawProcessParams, *mut ZrRawImage, *mut ZrRawMetadata
+) -> i32;
+type FreeImageFunc = unsafe extern "C" fn(*mut ZrRawImage);
+type VersionFunc = unsafe extern "C" fn() -> *const i8;
+
+
+/// Main ZrRaw processor
+pub struct ZrRaw {
+    _lib: Library,
+
+    zrraw_detect_format: DetectFormatFunc,
+    zrraw_extract_metadata: ExtractMetadataFunc,
+    zrraw_process_file: ProcessFileFunc,
+    zrraw_free_image: FreeImageFunc,
+    zrraw_version: VersionFunc,
+}
 impl ZrRaw {
+    /// Loads the zrraw dynamic library (e.g., zrraw.dll).
+    pub fn new() -> Result<Self, libloading::Error> {
+        unsafe {
+            let lib = Library::new("zrraw")?;
+
+  
+            let zrraw_detect_format = *lib.get::<DetectFormatFunc>(b"zrraw_detect_format")?;
+            let zrraw_extract_metadata = *lib.get::<ExtractMetadataFunc>(b"zrraw_extract_metadata")?;
+            let zrraw_process_file = *lib.get::<ProcessFileFunc>(b"zrraw_process_image")?;
+            let zrraw_free_image = *lib.get::<FreeImageFunc>(b"zrraw_free_image")?;
+            let zrraw_version = *lib.get::<VersionFunc>(b"zrraw_version")?;
+
+            // The dangerous `transmute` is no longer needed!
+            Ok(ZrRaw {
+                _lib: lib, // We just move the library directly into the struct
+                zrraw_detect_format,
+                zrraw_extract_metadata,
+                zrraw_process_file,
+                zrraw_free_image,
+                zrraw_version,
+            })
+        }
+    }
     /// Detect the format of a RAW file
-    pub fn detect_format(data: &[u8]) -> Result<RawFormat, ZrRawError> {
+    pub fn detect_format(&self, data: &[u8]) -> Result<RawFormat, ZrRawError> {
         let mut format = 0;
-        let result = unsafe { zrraw_detect_format(data.as_ptr(), data.len(), &mut format) };
+        let result = unsafe { (self.zrraw_detect_format)(data.as_ptr(), data.len(), &mut format) };
         if result != 0 { return Err(ZrRawError::from(result)); }
         Ok(format.into())
     }
 
     /// Extract metadata from RAW file
-    pub fn extract_metadata(data: &[u8]) -> Result<RawMetadata, ZrRawError> {
+    pub fn extract_metadata(&self, data: &[u8]) -> Result<RawMetadata, ZrRawError> {
         let mut metadata = unsafe { std::mem::zeroed::<ZrRawMetadata>() };
-        let result = unsafe { zrraw_extract_metadata(data.as_ptr(), data.len(), &mut metadata) };
+        let result = unsafe { (self.zrraw_extract_metadata)(data.as_ptr(), data.len(), &mut metadata) };
         if result != 0 { return Err(ZrRawError::from(result)); }
         Ok(metadata.into())
     }
 
-    // --- MODIFIED: This is the new primary function for processing ---
-    /// Process RAW file to an image and extract its metadata in one go.
     pub fn process_file(
+        &self,
         data: &[u8],
         params: ProcessingParams,
     ) -> Result<ProcessedRawFile, ZrRawError> {
@@ -207,28 +246,23 @@ impl ZrRaw {
         let ffi_params: ZrRawProcessParams = params.into();
 
         let result = unsafe {
-            zrraw_process_image(
-                data.as_ptr(),
-                data.len(),
-                &ffi_params,
-                &mut raw_image,
-                &mut raw_metadata,
+            (self.zrraw_process_file)(
+                data.as_ptr(), data.len(), &ffi_params, &mut raw_image, &mut raw_metadata
             )
         };
 
-        if result != 0 {
-            return Err(ZrRawError::from(result));
-        }
+        if result != 0 { return Err(ZrRawError::from(result)); }
 
         let dynamic_image = Self::convert_to_dynamic_image(&raw_image)?;
         let metadata: RawMetadata = raw_metadata.into();
 
-        unsafe { zrraw_free_image(&mut raw_image) };
+        unsafe { (self.zrraw_free_image)(&mut raw_image) };
 
-        Ok(ProcessedRawFile {
-            image: dynamic_image,
-            metadata,
-        })
+        Ok(ProcessedRawFile { image: dynamic_image, metadata })
+    }
+
+    pub fn version(&self) -> String {
+        unsafe { CStr::from_ptr((self.zrraw_version)()).to_string_lossy().into_owned() }
     }
 
     fn convert_to_dynamic_image(raw_image: &ZrRawImage) -> Result<DynamicImage, ZrRawError> {
@@ -259,10 +293,6 @@ impl ZrRaw {
         }
     }
 
-    /// Get library version
-    pub fn version() -> String {
-        unsafe { CStr::from_ptr(zrraw_version()).to_string_lossy().into_owned() }
-    }
 }
 
 #[cfg(test)]
@@ -271,23 +301,36 @@ mod tests {
 
     #[test]
     fn test_version() {
-        let version = ZrRaw::version();
+        // 1. Create an instance of the library loader
+        let zrraw_lib = ZrRaw::new().expect("Failed to load zrraw dynamic library");
+        
+        // 2. Call the method on the instance
+        let version = zrraw_lib.version();
         assert!(version.starts_with("zrraw"));
     }
 
     #[test]
     fn test_detect_unknown() {
+        // 1. Create an instance
+        let zrraw_lib = ZrRaw::new().expect("Failed to load zrraw dynamic library");
+        
         let dummy_data = vec![0u8; 100];
-        let format = ZrRaw::detect_format(&dummy_data).unwrap();
+        
+        // 2. Call the method on the instance
+        let format = zrraw_lib.detect_format(&dummy_data).unwrap();
         assert!(matches!(format, RawFormat::Unknown));
     }
 
-    // --- NEW TEST: Verify the new process_file function ---
     #[test]
     fn test_process_file_stub() {
+        // 1. Create an instance
+        let zrraw_lib = ZrRaw::new().expect("Failed to load zrraw dynamic library");
+        
         let dummy_data = vec![0u8; 100];
         let params = ProcessingParams::default();
-        let result = ZrRaw::process_file(&dummy_data, params).unwrap();
+        
+        // 2. Call the method on the instance
+        let result = zrraw_lib.process_file(&dummy_data, params).unwrap();
 
         // Check image from stub
         assert_eq!(result.image.width(), 1);

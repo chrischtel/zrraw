@@ -5,12 +5,13 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Static library for FFI
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addSharedLibrary(.{
         .name = "zrraw",
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
 
     // Export symbols for C/FFI

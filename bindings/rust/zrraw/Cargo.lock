@@ -1389,6 +1389,7 @@ name = "zrraw"
 version = "0.1.0"
 dependencies = [
  "image",
+ "libloading",
  "tempfile",
  "thiserror 2.0.12",
  "zrraw-sys",
