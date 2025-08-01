@@ -5,7 +5,9 @@ use std::io::{Cursor, Read};
 use std::path::PathBuf;
 
 fn main() {
-    // This variable will hold the path to the header file, wherever it comes from.
+    // Tell Cargo to re-run this script if it changes.
+    println!("cargo:rerun-if-changed=build.rs");
+
     let header_path: PathBuf;
 
     #[cfg(feature = "compile-from-source")]
@@ -17,15 +19,11 @@ fn main() {
 
     #[cfg(not(feature = "compile-from-source"))]
     {
-        println!("cargo:warning=Downloading pre-compiled zrraw library");
-        // This function will now return the path to the extracted header.
-        header_path = download_and_place_dll();
+        header_path = download_precompiled_library_if_missing();
     }
 
-    // Now, run bindgen using the correct header path.
     run_bindgen(&header_path);
 }
-
 /// Compiles the local Zig code into a DLL.
 fn build_from_source() {
     use std::process::Command;
@@ -46,57 +44,94 @@ fn build_from_source() {
 }
 
 /// Downloads the DLL from GitHub releases and places it where the executable can find it.
-fn download_and_place_dll() -> PathBuf {
+fn download_precompiled_library_if_missing() -> PathBuf {
     let target = env::var("TARGET").unwrap();
-    //TODO: NOT HARDCORE, get from cargo.toml
-    let version = "0.1.0";
+    let profile = env::var("PROFILE").unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let url = format!(
-        "https://github.com/chrischtel/zrraw/releases/download/v{}/zrraw-v{}-{}.zip",
-        version, version, target
-    );
-
-    println!("cargo:warning=Downloading zrraw from {}", url);
-    let response = ureq::get(&url)
-        .call()
-        .unwrap_or_else(|e| panic!("Failed to download zrraw library from {}: {:?}", url, e));
-
-    // --- THIS IS THE CORRECT API USAGE BASED ON YOUR DOCUMENTATION ---
-    // 1. Get the Body from the Response. We ignore the status and headers.
-    let (_, body) = response.into_parts();
-
-    // 2. Now, get a reader from the Body and read all bytes into a Vec.
-    let mut bytes: Vec<u8> = Vec::new();
-    body.into_reader().read_to_end(&mut bytes)
-        .unwrap_or_else(|e| panic!("Failed to read response bytes: {:?}", e));
-
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-
-    // Find the final destination for the DLL
-    let profile = env::var("PROFILE").unwrap();
+    // Determine the final destination path for the DLL/shared library
+    let lib_name = get_dynamic_lib_name(&target);
     let final_dest_dir = out_dir.ancestors().find(|p| p.ends_with(&profile)).unwrap();
+    let final_lib_path = final_dest_dir.join(lib_name);
 
-    // Iterate through the archive to find and extract both files
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i).unwrap();
-        let file_name = file.name().to_string();
-
-        if file_name.ends_with(".dll") || file_name.ends_with(".so") || file_name.ends_with(".dylib") {
-            let dll_path = final_dest_dir.join(&file_name);
-            let mut outfile = fs::File::create(&dll_path).unwrap();
-            std::io::copy(&mut file, &mut outfile).unwrap();
-            println!("cargo:warning=Placed library '{}' at {}", file_name, dll_path.display());
-        } else if file_name.ends_with(".h") {
-            // Extract the header to the temporary OUT_DIR
-            let header_path = out_dir.join(&file_name);
-            let mut outfile = fs::File::create(&header_path).unwrap();
-            std::io::copy(&mut file, &mut outfile).unwrap();
-        }
+    // --- CACHING LOGIC ---
+    // If the library already exists in the target directory, we don't need to download it.
+    if final_lib_path.exists() {
+        println!("cargo:warning=zrraw library already exists at {}. Skipping download.", final_lib_path.display());
+    } else {
+        // If the library is missing, download the full archive and place it.
+        println!("cargo:warning=zrraw library not found. Downloading pre-compiled version...");
+        let archive_bytes = download_archive_bytes(&target);
+        extract_library_from_archive(&archive_bytes, &final_dest_dir, lib_name);
     }
 
-    // Return the path to the extracted header file for bindgen to use
-    out_dir.join("zrraw.h")
+    // --- HEADER FILE LOGIC ---
+    // Bindgen always needs the header file. We check if it's in the temporary `OUT_DIR`.
+    // If not, we extract it from a downloaded archive.
+    let header_path = out_dir.join("zrraw.h");
+    if !header_path.exists() {
+        println!("cargo:warning=Header file not found. Extracting from archive...");
+        let archive_bytes = download_archive_bytes(&target);
+        extract_header_from_archive(&archive_bytes, &out_dir);
+    }
+
+    header_path
+}
+
+/// Downloads the release archive from GitHub and returns its content as bytes.
+fn download_archive_bytes(target: &str) -> Vec<u8> {
+    // Get version and repository URL from Cargo.toml environment variables
+    let version = env!("CARGO_PKG_VERSION");
+    let repo_url = env::var("CARGO_PKG_REPOSITORY").expect("CARGO_PKG_REPOSITORY not set in Cargo.toml");
+
+    // Construct the final download URL
+    let download_url = format!(
+        "{}/releases/download/v{}/zrraw-v{}-{}.zip",
+        repo_url, version, version, target
+    );
+
+    println!("cargo:warning=Downloading from {}", download_url);
+    let response = ureq::get(&download_url)
+        .call()
+        .unwrap_or_else(|e| panic!("Failed to download zrraw library from {}: {:?}", download_url, e));
+
+    let (_, body) = response.into_parts();
+    let mut bytes = Vec::new();
+    body.into_reader()
+        .read_to_end(&mut bytes)
+        .unwrap_or_else(|e| panic!("Failed to read response bytes: {:?}", e));
+
+    bytes
+}
+
+fn extract_library_from_archive(bytes: &[u8], dest_dir: &PathBuf, lib_name: &str) {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut library_file = archive.by_name(lib_name).expect("Library file not found in archive");
+
+    let final_lib_path = dest_dir.join(lib_name);
+    let mut outfile = fs::File::create(&final_lib_path).unwrap();
+    std::io::copy(&mut library_file, &mut outfile).unwrap();
+    println!("cargo:warning=Placed library '{}' at {}", lib_name, final_lib_path.display());
+}
+
+/// Extracts the header file from the archive bytes to the destination.
+fn extract_header_from_archive(bytes: &[u8], dest_dir: &PathBuf) {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut header_file = archive.by_name("zrraw.h").expect("Header file not found in archive");
+
+    let header_path = dest_dir.join("zrraw.h");
+    let mut outfile = fs::File::create(&header_path).unwrap();
+    std::io::copy(&mut header_file, &mut outfile).unwrap();
+}
+
+fn get_dynamic_lib_name(target: &str) -> &'static str {
+    if target.contains("windows") {
+        "zrraw.dll"
+    } else if target.contains("apple") {
+        "libzrraw.dylib"
+    } else {
+        "libzrraw.so"
+    }
 }
 
 /// Runs bindgen to generate Rust FFI types from the C header.
