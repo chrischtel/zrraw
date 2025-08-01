@@ -127,8 +127,8 @@ fn build_from_source() {
     use std::process::Command;
     let zrraw_root = PathBuf::from("../../../");
     let target = env::var("TARGET").unwrap();
-    let zig_target_str = target.replace("-pc", "");
-    let zig_target_arg = format!("-Dtarget={}", zig_target_str);
+    let zig_target = convert_rust_target_to_zig(&target);
+    let zig_target_arg = format!("-Dtarget={}", zig_target);
 
     let status = Command::new("zig")
         .args(&["build", "-Doptimize=ReleaseFast", &zig_target_arg])
@@ -138,6 +138,79 @@ fn build_from_source() {
 
     if !status.success() {
         panic!("Failed to build zrraw library");
+    }
+}
+
+/// Converts a Rust target triple to a Zig target triple
+fn convert_rust_target_to_zig(rust_target: &str) -> String {
+    match rust_target {
+        // Windows targets
+        "x86_64-pc-windows-msvc" => "x86_64-windows-msvc".to_string(),
+        "i686-pc-windows-msvc" => "i686-windows-msvc".to_string(),
+        "aarch64-pc-windows-msvc" => "aarch64-windows-msvc".to_string(),
+        "x86_64-pc-windows-gnu" => "x86_64-windows-gnu".to_string(),
+        "i686-pc-windows-gnu" => "i686-windows-gnu".to_string(),
+        
+        // Linux targets
+        "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu".to_string(),
+        "i686-unknown-linux-gnu" => "i686-linux-gnu".to_string(),
+        "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu".to_string(),
+        "arm-unknown-linux-gnueabihf" => "arm-linux-gnueabihf".to_string(),
+        "x86_64-unknown-linux-musl" => "x86_64-linux-musl".to_string(),
+        "aarch64-unknown-linux-musl" => "aarch64-linux-musl".to_string(),
+        
+        // macOS targets
+        "x86_64-apple-darwin" => "x86_64-macos".to_string(),
+        "aarch64-apple-darwin" => "aarch64-macos".to_string(),
+        
+        // iOS targets
+        "aarch64-apple-ios" => "aarch64-ios".to_string(),
+        "x86_64-apple-ios" => "x86_64-ios".to_string(),
+        
+        // FreeBSD targets
+        "x86_64-unknown-freebsd" => "x86_64-freebsd".to_string(),
+        
+        // WebAssembly
+        "wasm32-unknown-unknown" => "wasm32-freestanding".to_string(),
+        "wasm32-wasi" => "wasm32-wasi".to_string(),
+        
+        // For any unrecognized target, try a simple conversion
+        _ => {
+            // Extract architecture and try to map the OS
+            let parts: Vec<&str> = rust_target.split('-').collect();
+            if parts.len() >= 3 {
+                let arch = parts[0];
+                let os_part = if parts.len() > 3 { parts[2] } else { parts[1] };
+                
+                let zig_os = match os_part {
+                    "pc" | "unknown" => {
+                        // Look at the next part for the actual OS
+                        if parts.len() > 3 {
+                            match parts[3] {
+                                "windows" => "windows",
+                                _ => "linux" // Default fallback
+                            }
+                        } else {
+                            "linux" // Default fallback
+                        }
+                    },
+                    "apple" => "macos",
+                    "linux" => "linux",
+                    "windows" => "windows",
+                    "freebsd" => "freebsd",
+                    "netbsd" => "netbsd",
+                    "openbsd" => "openbsd",
+                    "dragonfly" => "dragonfly",
+                    "wasi" => "wasi",
+                    _ => "linux" // Default fallback
+                };
+                
+                format!("{}-{}", arch, zig_os)
+            } else {
+                // If we can't parse it, just pass it through and let Zig handle it
+                rust_target.to_string()
+            }
+        }
     }
 }
 
