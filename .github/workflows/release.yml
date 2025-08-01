@@ -60,7 +60,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0 # Or your preferred Zig version
+          version: 0.14.1 # Or your preferred Zig version
 
       # Step 3: Build the shared library for the specific target from the matrix.
       - name: Build shared library

@@ -20,7 +20,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0
+          version: 0.14.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -60,11 +60,19 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0 # Or your preferred Zig version
+          version: 0.14.1 # Or your preferred Zig version
 
       # Step 3: Install the Rust toolchain.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      # Step 3.5: Test building Zig library directly first
+      - name: Test Zig library build
+        run: |
+          echo "=== Testing Zig library build ==="
+          zig build -Doptimize=ReleaseFast
+          ls -la zig-out/lib/
+          ls -la zig-out/include/
 
       # Step 4: Run the Rust tests.
       # This is the key step. We use the 'compile-from-source' feature to force
@@ -72,38 +80,68 @@ jobs:
       # We also need to copy the compiled DLL to the correct location for the tests to find it.
       - name: Build and Run Rust Tests
         shell: bash
+        working-directory: bindings/rust
         run: |
+          set -e  # Exit on any error
+          
+          echo "=== Current directory and structure ==="
+          pwd
+          ls -la
+          
+          echo "=== Building Rust crates with Zig library compilation ==="
           # Build the Rust crates and the Zig library via the build.rs script.
           # This will create the test executable and the shared library.
           cargo build --workspace --features "zrraw-sys/compile-from-source" --tests
 
+          echo "=== Checking for compiled library ==="
+          ls -la ../../zig-out/lib/ || echo "zig-out/lib directory not found"
+          
+          echo "=== Checking target/debug/deps ==="
+          ls -la target/debug/deps/ | head -20
+          
           # --- Find the compiled library and the test executable ---
           # The exact paths can vary slightly, so we use wildcards.
           
           # On Windows, the library is a .dll
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            LIB_PATH=$(find zig-out/lib -name "zrraw.dll")
-            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*.exe" -printf "%h\n" | head -n 1)
-            cp "$LIB_PATH" "$TEST_EXE_DIR/"
+            LIB_PATH=$(find ../../zig-out/lib -name "zrraw.dll")
+            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*.exe" | head -n 1 | xargs dirname)
+            if [[ -n "$LIB_PATH" && -n "$TEST_EXE_DIR" ]]; then
+              cp "$LIB_PATH" "$TEST_EXE_DIR/"
+            else
+              echo "Error: Could not find library or test executable"
+              exit 1
+            fi
           fi
           
           # On macOS, the library is a .dylib
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            LIB_PATH=$(find zig-out/lib -name "libzrraw.dylib")
-            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*" ! -name "*.d" -printf "%h\n" | head -n 1)
-            cp "$LIB_PATH" "$TEST_EXE_DIR/"
+            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw.dylib")
+            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*" ! -name "*.d" | head -n 1 | xargs dirname)
+            if [[ -n "$LIB_PATH" && -n "$TEST_EXE_DIR" ]]; then
+              cp "$LIB_PATH" "$TEST_EXE_DIR/"
+            else
+              echo "Error: Could not find library or test executable"
+              exit 1
+            fi
           fi
           
           # On Linux, the library is a .so
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            LIB_PATH=$(find zig-out/lib -name "libzrraw.so")
-            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*" ! -name "*.d" -printf "%h\n" | head -n 1)
-            cp "$LIB_PATH" "$TEST_EXE_DIR/"
+            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw.so")
+            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*" ! -name "*.d" | head -n 1 | xargs dirname)
+            if [[ -n "$LIB_PATH" && -n "$TEST_EXE_DIR" ]]; then
+              cp "$LIB_PATH" "$TEST_EXE_DIR/"
+            else
+              echo "Error: Could not find library or test executable"
+              exit 1
+            fi
           fi
           
           echo "Library found at: $LIB_PATH"
           echo "Test executable directory: $TEST_EXE_DIR"
           echo "Copied library to test directory."
 
+          echo "=== Running tests ==="
           # Now that the library is in the right place, run the tests.
-          cargo test --workspace --features "zrraw-sys/compile-from-source"
+          cargo test --workspace --features "zrraw-sys/compile-from-source" --verbose

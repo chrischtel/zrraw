@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "zrraw-sys",
+    "zrraw",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/chrischtel/zrraw"
+license = "MIT OR Apache-2.0"
+authors = ["Your Name <your.email@example.com>"]
+
+[workspace.dependencies]
+# Shared dependencies across workspace
+thiserror = "2.0.12"

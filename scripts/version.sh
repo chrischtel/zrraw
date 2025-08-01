@@ -36,7 +36,7 @@ print_usage() {
 }
 
 get_current_version() {
-    grep '^version = ' "$ROOT_DIR/bindings/rust/zrraw/Cargo.toml" | sed 's/version = "\(.*\)"/\1/'
+    grep '^version = ' "$ROOT_DIR/bindings/rust/Cargo.toml" | sed 's/version = "\(.*\)"/\1/'
 }
 
 parse_version() {
@@ -107,16 +107,14 @@ bump_version() {
     
     # Update Cargo.toml files
     echo -e "${YELLOW}Updating Cargo.toml files...${NC}"
-    sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$ROOT_DIR/bindings/rust/zrraw/Cargo.toml"
-    sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$ROOT_DIR/bindings/rust/zrraw-sys/Cargo.toml"
+    sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$ROOT_DIR/bindings/rust/Cargo.toml"
     
     # Update build.zig.zon
     echo -e "${YELLOW}Updating build.zig.zon...${NC}"
     sed -i.bak "s/\\.version = \".*\"/\.version = \"$NEW_VERSION\"/" "$ROOT_DIR/build.zig.zon"
     
     # Clean up backup files
-    rm -f "$ROOT_DIR/bindings/rust/zrraw/Cargo.toml.bak"
-    rm -f "$ROOT_DIR/bindings/rust/zrraw-sys/Cargo.toml.bak"
+    rm -f "$ROOT_DIR/bindings/rust/Cargo.toml.bak"
     rm -f "$ROOT_DIR/build.zig.zon.bak"
     
     echo -e "${GREEN}✅ Version updated to $NEW_VERSION${NC}"

@@ -33,7 +33,7 @@ function Print-Usage {
 }
 
 function Get-CurrentVersion {
-    $cargoToml = Get-Content ".\bindings\rust\zrraw\Cargo.toml"
+    $cargoToml = Get-Content ".\bindings\rust\Cargo.toml"
     $versionLine = $cargoToml | Where-Object { $_ -match '^version = "(.+)"' }
     if ($versionLine) {
         return $Matches[1]
@@ -114,8 +114,7 @@ function Bump-Version {
         
         # Update files
         Write-Host "Updating Cargo.toml files..." -ForegroundColor Yellow
-        Update-FileVersion ".\bindings\rust\zrraw\Cargo.toml" $newVersion
-        Update-FileVersion ".\bindings\rust\zrraw-sys\Cargo.toml" $newVersion
+        Update-FileVersion ".\bindings\rust\Cargo.toml" $newVersion
         
         Write-Host "Updating build.zig.zon..." -ForegroundColor Yellow
         Update-FileVersion ".\build.zig.zon" $newVersion

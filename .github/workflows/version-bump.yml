@@ -31,8 +31,8 @@ jobs:
           if git diff HEAD~1 HEAD --name-only | grep -E "(Cargo\.toml|build\.zig\.zon)"; then
             echo "Files with potential version changes detected"
             
-            # Get the current version from the main Rust crate
-            CURRENT_VERSION=$(grep '^version = ' bindings/rust/zrraw/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+            # Get the current version from the workspace Cargo.toml
+            CURRENT_VERSION=$(grep '^version = ' bindings/rust/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
             
             # Check if this version already has a tag
             if git tag -l | grep -q "v${CURRENT_VERSION}"; then

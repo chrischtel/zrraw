@@ -1,13 +1,14 @@
 # bindings/rust/zrraw/Cargo.toml
 [package]
 name = "zrraw"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
 
 [dependencies]
 zrraw-sys = { path = "../zrraw-sys" }
 image = "0.25.6"
-thiserror = "2.0.12"
+thiserror.workspace = true
 libloading = "0.8.8"
 
 [dev-dependencies]
