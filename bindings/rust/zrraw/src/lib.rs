@@ -197,10 +197,90 @@ pub struct ZrRaw {
     zrraw_version: VersionFunc,
 }
 impl ZrRaw {
+    /// Helper method to locate and load the zrraw dynamic library
+    fn load_library() -> Result<Library, libloading::Error> {
+        // Define the library name for each platform
+        let lib_name = if cfg!(target_os = "windows") {
+            "zrraw.dll"
+        } else if cfg!(target_os = "macos") {
+            "libzrraw.dylib"
+        } else {
+            "libzrraw.so"
+        };
+        
+        // Also try the version without "lib" prefix on unix platforms for fallback
+        let alt_lib_name = if cfg!(target_os = "windows") {
+            "zrraw.dll"
+        } else if cfg!(target_os = "macos") {
+            "zrraw.dylib"
+        } else {
+            "zrraw.so"
+        };
+        
+        // Get current working directory for debugging
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        eprintln!("ZrRaw library loading: Current working directory: {}", cwd.display());
+        
+        // Try loading from multiple locations in order of preference:
+        let search_paths = vec![
+            // 1. Try in the target/debug/deps directory (where CI copies it)
+            std::path::PathBuf::from("target/debug/deps").join(lib_name),
+            
+            // 2. Try alternative name in target/debug/deps
+            std::path::PathBuf::from("target/debug/deps").join(alt_lib_name),
+            
+            // 3. Try from parent directory (for CI workspace layout)
+            std::path::PathBuf::from("../target/debug/deps").join(lib_name),
+            
+            // 4. Try alternative name from parent directory
+            std::path::PathBuf::from("../target/debug/deps").join(alt_lib_name),
+            
+            // 5. Try relative to current working directory (for local development)
+            std::path::PathBuf::from(lib_name),
+            
+            // 6. Try in zig-out/lib (local development)
+            std::path::PathBuf::from("zig-out/lib").join(lib_name),
+            
+            // 7. Try in zig-out/lib from parent directory
+            std::path::PathBuf::from("../../../zig-out/lib").join(lib_name),
+            
+            // 8. Try absolute path from current directory
+            cwd.join("target/debug/deps").join(lib_name),
+            
+            // 9. Try absolute path with alternative name
+            cwd.join("target/debug/deps").join(alt_lib_name),
+            
+            // 10. Try relative to the current executable
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join(lib_name)))
+                .unwrap_or_else(|| std::path::PathBuf::from(lib_name)),
+        ];
+        
+        // Try each path
+        for path in &search_paths {
+            eprintln!("ZrRaw library loading: Trying {}", path.display());
+            match unsafe { Library::new(path) } {
+                Ok(lib) => {
+                    eprintln!("ZrRaw library loading: Successfully loaded from {}", path.display());
+                    return Ok(lib);
+                },
+                Err(e) => {
+                    eprintln!("ZrRaw library loading: Failed to load from {}: {}", path.display(), e);
+                    continue;
+                }
+            }
+        }
+        
+        // If all paths fail, try the simple name (system search)
+        eprintln!("ZrRaw library loading: Trying system search for 'zrraw'");
+        unsafe { Library::new("zrraw") }
+    }
+    
     /// Loads the zrraw dynamic library (e.g., zrraw.dll).
     pub fn new() -> Result<Self, libloading::Error> {
         unsafe {
-            let lib = Library::new("zrraw")?;
+            let lib = Self::load_library()?;
 
   
             let zrraw_detect_format = *lib.get::<DetectFormatFunc>(b"zrraw_detect_format")?;
