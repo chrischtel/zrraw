@@ -72,37 +72,55 @@ jobs:
           
           # On Windows, the library is a .dll
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            LIB_PATH=$(find ../../zig-out/lib -name "zrraw.dll")
+            # Look for any dll file (versioned or not)
+            LIB_PATH=$(find ../../zig-out/lib -name "zrraw*.dll" | head -n 1)
+            if [[ -z "$LIB_PATH" ]]; then
+              echo "Error: Could not find zrraw dll in ../../zig-out/lib/"
+              ls -la ../../zig-out/lib/
+              exit 1
+            fi
             # Find all test executables and copy the DLL to their directories
             find target/debug/deps -name "zrraw*-*.exe" | while read test_exe; do
               TEST_EXE_DIR=$(dirname "$test_exe")
-              echo "Copying $LIB_PATH to $TEST_EXE_DIR/"
-              cp "$LIB_PATH" "$TEST_EXE_DIR/"
+              echo "Copying $LIB_PATH to $TEST_EXE_DIR/ as zrraw.dll"
+              cp "$LIB_PATH" "$TEST_EXE_DIR/zrraw.dll"
             done
           fi
           
           # On macOS, the library is a .dylib
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw.dylib")
+            # Look for any dylib file (versioned or not)
+            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw*.dylib" | grep -E "(libzrraw\.dylib|libzrraw\.[0-9]+\.[0-9]+\.[0-9]+\.dylib)" | head -n 1)
+            if [[ -z "$LIB_PATH" ]]; then
+              echo "Error: Could not find libzrraw dylib in ../../zig-out/lib/"
+              ls -la ../../zig-out/lib/
+              exit 1
+            fi
             # Find all test executables and copy the dylib to their directories
             find target/debug/deps -name "zrraw*" ! -name "*.d" | while read test_exe; do
               if [[ -f "$test_exe" ]]; then
                 TEST_EXE_DIR=$(dirname "$test_exe")
-                echo "Copying $LIB_PATH to $TEST_EXE_DIR/"
-                cp "$LIB_PATH" "$TEST_EXE_DIR/"
+                echo "Copying $LIB_PATH to $TEST_EXE_DIR/ as libzrraw.dylib"
+                cp "$LIB_PATH" "$TEST_EXE_DIR/libzrraw.dylib"
               fi
             done
           fi
           
           # On Linux, the library is a .so
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw.so")
+            # Look for any so file (versioned or not)
+            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw*.so*" | grep -E "(libzrraw\.so|libzrraw\.so\.[0-9]+\.[0-9]+\.[0-9]+)" | head -n 1)
+            if [[ -z "$LIB_PATH" ]]; then
+              echo "Error: Could not find libzrraw so in ../../zig-out/lib/"
+              ls -la ../../zig-out/lib/
+              exit 1
+            fi
             # Find all test executables and copy the so to their directories
             find target/debug/deps -name "zrraw*" ! -name "*.d" | while read test_exe; do
               if [[ -f "$test_exe" ]]; then
                 TEST_EXE_DIR=$(dirname "$test_exe")
-                echo "Copying $LIB_PATH to $TEST_EXE_DIR/"
-                cp "$LIB_PATH" "$TEST_EXE_DIR/"
+                echo "Copying $LIB_PATH to $TEST_EXE_DIR/ as libzrraw.so"
+                cp "$LIB_PATH" "$TEST_EXE_DIR/libzrraw.so"
               fi
             done
           fi
