@@ -70,10 +70,13 @@ jobs:
           
           # On Windows, the library is a .dll
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            # Look for any dll file (versioned or not)
-            LIB_PATH=$(find ../../zig-out/lib -name "zrraw*.dll" | head -n 1)
+            # On Windows, DLLs are in zig-out/bin, not zig-out/lib
+            LIB_PATH=$(find ../../zig-out/bin -name "zrraw*.dll" | head -n 1)
             if [[ -z "$LIB_PATH" ]]; then
-              echo "Error: Could not find zrraw dll in ../../zig-out/lib/"
+              echo "Error: Could not find zrraw dll in ../../zig-out/bin/"
+              echo "Contents of zig-out/bin:"
+              ls -la ../../zig-out/bin/
+              echo "Contents of zig-out/lib:"
               ls -la ../../zig-out/lib/
               exit 1
             fi
