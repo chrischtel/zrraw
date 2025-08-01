@@ -76,54 +76,65 @@ jobs:
               ls -la ../../zig-out/lib/
               exit 1
             fi
-            # Find all test executables and copy the DLL to their directories
-            find target/debug/deps -name "zrraw*-*.exe" | while read test_exe; do
-              TEST_EXE_DIR=$(dirname "$test_exe")
-              echo "Copying $LIB_PATH to $TEST_EXE_DIR/ as zrraw.dll"
-              cp "$LIB_PATH" "$TEST_EXE_DIR/zrraw.dll"
-            done
+            echo "Found library: $LIB_PATH"
+            
+            # Copy to target/debug/deps directory (main location)
+            echo "Copying $LIB_PATH to target/debug/deps/ as zrraw.dll"
+            cp "$LIB_PATH" target/debug/deps/zrraw.dll
+            
+            # Set PATH for Windows
+            echo "PATH=target/debug/deps;$PATH" >> $GITHUB_ENV
           fi
           
           # On macOS, the library is a .dylib
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             # Look for any dylib file (versioned or not)
-            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw*.dylib" | grep -E "(libzrraw\.dylib|libzrraw\.[0-9]+\.[0-9]+\.[0-9]+\.dylib)" | head -n 1)
+            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw*.dylib" | head -n 1)
             if [[ -z "$LIB_PATH" ]]; then
               echo "Error: Could not find libzrraw dylib in ../../zig-out/lib/"
               ls -la ../../zig-out/lib/
               exit 1
             fi
-            # Find all test executables and copy the dylib to their directories
-            find target/debug/deps -name "zrraw*" ! -name "*.d" | while read test_exe; do
-              if [[ -f "$test_exe" ]]; then
-                TEST_EXE_DIR=$(dirname "$test_exe")
-                echo "Copying $LIB_PATH to $TEST_EXE_DIR/ as libzrraw.dylib"
-                cp "$LIB_PATH" "$TEST_EXE_DIR/libzrraw.dylib"
-              fi
-            done
+            echo "Found library: $LIB_PATH"
+            
+            # Copy to target/debug/deps directory (main location)
+            echo "Copying $LIB_PATH to target/debug/deps/ as libzrraw.dylib"
+            cp "$LIB_PATH" target/debug/deps/libzrraw.dylib
+            
+            # Also copy without lib prefix since the Rust code looks for "zrraw"
+            echo "Copying $LIB_PATH to target/debug/deps/ as zrraw.dylib"
+            cp "$LIB_PATH" target/debug/deps/zrraw.dylib
+            
+            # Set DYLD_LIBRARY_PATH for macOS
+            echo "DYLD_LIBRARY_PATH=target/debug/deps:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
           fi
           
           # On Linux, the library is a .so
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             # Look for any so file (versioned or not)
-            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw*.so*" | grep -E "(libzrraw\.so|libzrraw\.so\.[0-9]+\.[0-9]+\.[0-9]+)" | head -n 1)
+            LIB_PATH=$(find ../../zig-out/lib -name "libzrraw*.so*" | head -n 1)
             if [[ -z "$LIB_PATH" ]]; then
               echo "Error: Could not find libzrraw so in ../../zig-out/lib/"
               ls -la ../../zig-out/lib/
               exit 1
             fi
-            # Find all test executables and copy the so to their directories
-            find target/debug/deps -name "zrraw*" ! -name "*.d" | while read test_exe; do
-              if [[ -f "$test_exe" ]]; then
-                TEST_EXE_DIR=$(dirname "$test_exe")
-                echo "Copying $LIB_PATH to $TEST_EXE_DIR/ as libzrraw.so"
-                cp "$LIB_PATH" "$TEST_EXE_DIR/libzrraw.so"
-              fi
-            done
+            echo "Found library: $LIB_PATH"
+            
+            # Copy to target/debug/deps directory (main location)
+            echo "Copying $LIB_PATH to target/debug/deps/ as libzrraw.so"
+            cp "$LIB_PATH" target/debug/deps/libzrraw.so
+            
+            # Also copy without lib prefix since the Rust code looks for "zrraw"
+            echo "Copying $LIB_PATH to target/debug/deps/ as zrraw.so"
+            cp "$LIB_PATH" target/debug/deps/zrraw.so
+            
+            # Set LD_LIBRARY_PATH for Linux
+            echo "LD_LIBRARY_PATH=target/debug/deps:$LD_LIBRARY_PATH" >> $GITHUB_ENV
           fi
           
-          echo "Library found at: $LIB_PATH"
-          echo "Copied library to test directories."
+          echo "=== Library copying complete ==="
+          echo "Verifying library files in target/debug/deps:"
+          ls -la target/debug/deps/ | grep -E "(zrraw|libzrraw)" || echo "No zrraw libraries found"
 
           echo "=== Running tests ==="
           # Now that the library is in the right place, run the tests.
