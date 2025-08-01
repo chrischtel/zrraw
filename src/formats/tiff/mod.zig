@@ -30,16 +30,16 @@ pub const IfdParser = struct {
     pub fn read_u16(self: IfdParser, offset: usize) u16 {
         const bytes = self.data[offset .. offset + 2];
         return switch (self.byte_order) {
-            .little => std.mem.readIntLittle(u16, bytes[0..2]),
-            .big => std.mem.readIntBig(u16, bytes[0..2]),
+            .little => std.mem.readInt(u16, bytes[0..2], .little),
+            .big => std.mem.readInt(u16, bytes[0..2], .big),
         };
     }
 
     pub fn read_u32(self: IfdParser, offset: usize) u32 {
         const bytes = self.data[offset .. offset + 4];
         return switch (self.byte_order) {
-            .little => std.mem.readIntLittle(u32, bytes[0..4]),
-            .big => std.mem.readIntBig(u32, bytes[0..4]),
+            .little => std.mem.readInt(u32, bytes[0..4], .little),
+            .big => std.mem.readInt(u32, bytes[0..4], .big),
         };
     }
 

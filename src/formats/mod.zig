@@ -2,6 +2,9 @@
 const std = @import("std");
 const root = @import("../root.zig");
 
+// Import format-specific modules
+const rw2 = @import("rw2.zig");
+
 pub const FormatError = error{
     UnsupportedFormat,
     InvalidHeader,
@@ -59,34 +62,65 @@ pub const RawMetadata = struct {
 
 // Stub implementations
 pub fn detect(data: []const u8) !root.ZrRawFormat {
-    _ = data;
+    // Check for RW2 format first
+    if (rw2.detect(data)) {
+        return .RW2;
+    }
+
+    // TODO: Add other format detections here
+    // if (cr2.detect(data)) return .CR2;
+    // if (nef.detect(data)) return .NEF;
+    // etc.
+
     return .Unknown;
 }
 
 pub fn parse_metadata(data: []const u8, allocator: std.mem.Allocator) !RawMetadata {
-    _ = data;
-    return RawMetadata{
-        .format = .Unknown,
-        .width = 0,
-        .height = 0,
-        .make = try allocator.dupe(u8, "Unknown Make"), // Use different strings for clarity
-        .model = try allocator.dupe(u8, "Stub Model"),
-        .iso = 0,
-        .shutter_speed = 0.0,
-        .aperture = 0.0,
-        .focal_length = 0.0,
-        .color_matrix = [_]f32{0.0} ** 9,
-        .white_balance = [_]f32{ 1.0, 1.0, 1.0 },
-        .black_level = [_]f32{0.0} ** 4,
-        .white_level = [_]u32{65535} ** 4,
-        .raw_data_offset = 0,
-        .raw_data_size = 0,
-        .allocator = allocator,
-    };
+    // Detect format first
+    const format = try detect(data);
+
+    // Parse based on detected format
+    switch (format) {
+        .RW2 => return rw2.parse_metadata(data, allocator),
+        .Unknown => {
+            // Return stub metadata for unknown formats
+            return RawMetadata{
+                .format = .Unknown,
+                .width = 0,
+                .height = 0,
+                .make = try allocator.dupe(u8, "Unknown Make"),
+                .model = try allocator.dupe(u8, "Stub Model"),
+                .iso = 0,
+                .shutter_speed = 0.0,
+                .aperture = 0.0,
+                .focal_length = 0.0,
+                .color_matrix = [_]f32{0.0} ** 9,
+                .white_balance = [_]f32{ 1.0, 1.0, 1.0 },
+                .black_level = [_]f32{0.0} ** 4,
+                .white_level = [_]u32{65535} ** 4,
+                .raw_data_offset = 0,
+                .raw_data_size = 0,
+                .allocator = allocator,
+            };
+        },
+        else => {
+            // TODO: Add other format parsers
+            return FormatError.UnsupportedFormat;
+        },
+    }
 }
 
 pub fn extract_raw_data(data: []const u8, metadata: RawMetadata, allocator: std.mem.Allocator) ![]u16 {
-    _ = data;
-    _ = metadata;
-    return try allocator.alloc(u16, 1);
+    // Extract raw data based on format
+    switch (metadata.format) {
+        .RW2 => return rw2.extract_raw_data(data, metadata, allocator),
+        .Unknown => {
+            // Return minimal stub data
+            return try allocator.alloc(u16, 1);
+        },
+        else => {
+            // TODO: Add other format extractors
+            return FormatError.UnsupportedFormat;
+        },
+    }
 }
