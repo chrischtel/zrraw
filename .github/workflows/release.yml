@@ -1,0 +1,106 @@
+name: Create Release and Upload Binaries
+
+# This workflow runs ONLY when you push a new tag that starts with 'v' (e.g., v0.1.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  # Determine if this is a prerelease based on the tag name
+  # Prereleases contain: alpha, beta, rc, dev, pre, or have a dash followed by text
+  IS_PRERELEASE: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'dev') || contains(github.ref_name, 'pre') || contains(github.ref_name, '-') }}
+
+jobs:
+  build-and-upload:
+    name: Build and Upload for ${{ matrix.target.name }}
+    # We can build everything from a single Linux machine because Zig is great at cross-compilation.
+    runs-on: ubuntu-latest
+
+    # This matrix defines all the platforms we want to build for.
+    strategy:
+      matrix:
+        target:
+          - name: Windows x86_64
+            rust_triple: x86_64-pc-windows-msvc
+            zig_target: x86_64-windows-msvc
+            lib_name: zrraw.dll
+            ext: zip
+
+          - name: Linux x86_64
+            rust_triple: x86_64-unknown-linux-gnu
+            zig_target: x86_64-linux-gnu
+            lib_name: libzrraw.so
+            ext: tar.gz
+
+          - name: macOS x86_64 (Intel)
+            rust_triple: x86_64-apple-darwin
+            zig_target: x86_64-macos
+            lib_name: libzrraw.dylib
+            ext: tar.gz
+
+          - name: macOS aarch64 (Apple Silicon)
+            rust_triple: aarch64-apple-darwin
+            zig_target: aarch64-macos
+            lib_name: libzrraw.dylib
+            ext: tar.gz
+
+    steps:
+      # Step 1: Get the source code from your repository.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 1.5: Debug - Show if this is detected as a prerelease
+      - name: Check release type
+        run: |
+          echo "Tag: ${{ github.ref_name }}"
+          echo "Is prerelease: ${{ env.IS_PRERELEASE }}"
+
+      # Step 2: Install the Zig compiler on the build machine.
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0 # Or your preferred Zig version
+
+      # Step 3: Build the shared library for the specific target from the matrix.
+      - name: Build shared library
+        run: zig build -Dtarget=${{ matrix.zig_target }} -Doptimize=ReleaseFast
+
+      # Step 4: Create a temporary folder to package our release files.
+      - name: Stage files for packaging
+        run: |
+          mkdir -p release_package
+          cp zig-out/lib/${{ matrix.lib_name }} release_package/
+          cp zig-out/include/zrraw.h release_package/
+          # It's good practice to include the license in your release archives.
+          if [ -f LICENSE ]; then cp LICENSE release_package/; fi
+
+      # Step 5: Create the final archive file (.zip or .tar.gz) with the correct name.
+      - name: Create archive
+        shell: bash
+        run: |
+          # Get the version from the Git tag (e.g., v0.1.0 -> v0.1.0)
+          VERSION=${{ github.ref_name }}
+          ASSET_NAME="zrraw-${VERSION}-${{ matrix.rust_triple }}.${{ matrix.ext }}"
+          echo "ASSET_NAME=${ASSET_NAME}" >> $GITHUB_ENV
+          
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            cd release_package && zip ../${ASSET_NAME} *
+          else
+            tar -czf ${ASSET_NAME} -C release_package .
+          fi
+
+      # Step 6: This is the magic step. It creates a single GitHub Release for the tag
+      # and uploads the archive file from this job as an asset.
+      # Prereleases are marked appropriately and get different visibility.
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          # This tells the action to upload the file we just created.
+          files: ${{ env.ASSET_NAME }}
+          # Mark as prerelease if the tag contains prerelease indicators
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
+          # Generate release notes automatically
+          generate_release_notes: true
+          # For prereleases, add a note about stability
+          body: ${{ env.IS_PRERELEASE == 'true' && '⚠️ **This is a prerelease version** - Use with caution in production environments.' || '' }}

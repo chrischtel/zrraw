@@ -1,0 +1,151 @@
+name: Prerelease Builds
+
+# This workflow creates prerelease builds for development branches
+# It runs on pushes to develop/beta/rc branches and creates draft releases
+on:
+  push:
+    branches:
+      - develop
+      - beta
+      - 'release/**'
+      - 'rc/**'
+  workflow_dispatch:
+    inputs:
+      version_suffix:
+        description: 'Version suffix (e.g., alpha.1, beta.2, rc.1)'
+        required: true
+        type: string
+
+jobs:
+  create-prerelease:
+    name: Create Prerelease Build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for version calculation
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Generate version
+        id: version
+        run: |
+          # Get the latest tag or use 0.0.0 if no tags exist
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Remove 'v' prefix for version number
+          VERSION=${LATEST_TAG#v}
+          
+          # Get commit count since last tag
+          COMMIT_COUNT=$(git rev-list --count ${LATEST_TAG}..HEAD 2>/dev/null || git rev-list --count HEAD)
+          
+          # Get short commit hash
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          # Determine suffix based on branch or input
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SUFFIX="${{ github.event.inputs.version_suffix }}"
+          else
+            case "${{ github.ref_name }}" in
+              develop)
+                SUFFIX="dev.${COMMIT_COUNT}+${SHORT_SHA}"
+                ;;
+              beta)
+                SUFFIX="beta.${COMMIT_COUNT}+${SHORT_SHA}"
+                ;;
+              release/*)
+                SUFFIX="rc.${COMMIT_COUNT}+${SHORT_SHA}"
+                ;;
+              rc/*)
+                SUFFIX="rc.${COMMIT_COUNT}+${SHORT_SHA}"
+                ;;
+              *)
+                SUFFIX="pre.${COMMIT_COUNT}+${SHORT_SHA}"
+                ;;
+            esac
+          fi
+          
+          PRERELEASE_VERSION="${VERSION}-${SUFFIX}"
+          PRERELEASE_TAG="v${PRERELEASE_VERSION}"
+          
+          echo "version=${PRERELEASE_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${PRERELEASE_TAG}" >> $GITHUB_OUTPUT
+          echo "latest_tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          
+          echo "Generated prerelease version: ${PRERELEASE_VERSION}"
+          echo "Generated prerelease tag: ${PRERELEASE_TAG}"
+
+      - name: Create and push prerelease tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Build binaries for all platforms
+        run: |
+          # Create release directory
+          mkdir -p release_builds
+          
+          # Build for each target
+          declare -A targets=(
+            ["x86_64-windows-msvc"]="zrraw.dll"
+            ["x86_64-linux-gnu"]="libzrraw.so"
+            ["x86_64-macos"]="libzrraw.dylib"
+            ["aarch64-macos"]="libzrraw.dylib"
+          )
+          
+          for target in "${!targets[@]}"; do
+            lib_name="${targets[$target]}"
+            echo "Building for $target..."
+            
+            # Build the library
+            zig build -Dtarget=$target -Doptimize=ReleaseFast
+            
+            # Create package directory
+            pkg_dir="release_builds/zrraw-${{ steps.version.outputs.version }}-$target"
+            mkdir -p "$pkg_dir"
+            
+            # Copy files
+            cp "zig-out/lib/$lib_name" "$pkg_dir/"
+            cp zig-out/include/zrraw.h "$pkg_dir/"
+            if [ -f LICENSE ]; then cp LICENSE "$pkg_dir/"; fi
+            if [ -f README.md ]; then cp README.md "$pkg_dir/"; fi
+            
+            # Create archive
+            if [[ "$target" == *"windows"* ]]; then
+              (cd release_builds && zip -r "zrraw-${{ steps.version.outputs.version }}-$target.zip" "zrraw-${{ steps.version.outputs.version }}-$target")
+            else
+              tar -czf "release_builds/zrraw-${{ steps.version.outputs.version }}-$target.tar.gz" -C release_builds "zrraw-${{ steps.version.outputs.version }}-$target"
+            fi
+          done
+
+      - name: Create prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Prerelease ${{ steps.version.outputs.version }}"
+          prerelease: true
+          draft: false
+          generate_release_notes: true
+          body: |
+            🚧 **Prerelease Build** 🚧
+            
+            This is an automated prerelease build from the `${{ github.ref_name }}` branch.
+            
+            **⚠️ Warning**: This is a development build and may be unstable. Use with caution in production environments.
+            
+            - **Version**: `${{ steps.version.outputs.version }}`
+            - **Branch**: `${{ github.ref_name }}`
+            - **Commit**: `${{ github.sha }}`
+            - **Based on**: `${{ steps.version.outputs.latest_tag }}`
+            
+            ## Changes since ${{ steps.version.outputs.latest_tag }}
+            
+          files: |
+            release_builds/*.zip
+            release_builds/*.tar.gz

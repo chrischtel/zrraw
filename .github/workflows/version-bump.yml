@@ -1,0 +1,96 @@
+name: Version Bump Release
+
+# This workflow automatically creates releases when version is bumped in Cargo.toml
+# It runs when a commit to main changes the version in any Cargo.toml file
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "**/Cargo.toml"
+      - "build.zig.zon"
+
+jobs:
+  check-version-bump:
+    name: Check for Version Bump
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      new_version: ${{ steps.check.outputs.new_version }}
+      is_prerelease: ${{ steps.check.outputs.is_prerelease }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need at least 2 commits to compare
+
+      - name: Check for version changes
+        id: check
+        run: |
+          # Check if any Cargo.toml version changed
+          if git diff HEAD~1 HEAD --name-only | grep -E "(Cargo\.toml|build\.zig\.zon)"; then
+            echo "Files with potential version changes detected"
+            
+            # Get the current version from the main Rust crate
+            CURRENT_VERSION=$(grep '^version = ' bindings/rust/zrraw/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+            
+            # Check if this version already has a tag
+            if git tag -l | grep -q "v${CURRENT_VERSION}"; then
+              echo "Version v${CURRENT_VERSION} already tagged, skipping"
+              echo "version_changed=false" >> $GITHUB_OUTPUT
+            else
+              echo "New version detected: ${CURRENT_VERSION}"
+              echo "version_changed=true" >> $GITHUB_OUTPUT
+              echo "new_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+              
+              # Check if this is a prerelease version
+              if [[ "$CURRENT_VERSION" =~ (alpha|beta|rc|dev|pre) ]] || [[ "$CURRENT_VERSION" =~ - ]]; then
+                echo "is_prerelease=true" >> $GITHUB_OUTPUT
+              else
+                echo "is_prerelease=false" >> $GITHUB_OUTPUT
+              fi
+            fi
+          else
+            echo "No version-related files changed"
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  create-release:
+    name: Create Release from Version Bump
+    needs: check-version-bump
+    if: needs.check-version-bump.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          TAG="v${{ needs.check-version-bump.outputs.new_version }}"
+          echo "Creating tag: $TAG"
+          
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ needs.check-version-bump.outputs.new_version }}"
+          name: "Release ${{ needs.check-version-bump.outputs.new_version }}"
+          prerelease: ${{ needs.check-version-bump.outputs.is_prerelease == 'true' }}
+          generate_release_notes: true
+          body: |
+            🎉 **Automatic Release** 🎉
+            
+            This release was automatically created from a version bump in the repository.
+            
+            **Version**: `${{ needs.check-version-bump.outputs.new_version }}`
+            **Type**: ${{ needs.check-version-bump.outputs.is_prerelease == 'true' && 'Prerelease' || 'Stable Release' }}
+            
+            Binaries will be available shortly as the release workflow completes.
+            
+            ## What's Changed
