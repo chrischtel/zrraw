@@ -13,6 +13,7 @@ jobs:
     name: Test on ${{ matrix.os }}
     # This matrix will run the same set of steps on three different operating systems.
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
@@ -51,10 +52,6 @@ jobs:
         run: |
           set -e  # Exit on any error
           
-          echo "=== Current directory and structure ==="
-          pwd
-          ls -la
-          
           echo "=== Building Rust crates with Zig library compilation ==="
           # Build the Rust crates and the Zig library via the build.rs script.
           # This will create the test executable and the shared library.
@@ -63,8 +60,8 @@ jobs:
           echo "=== Checking for compiled library ==="
           ls -la ../../zig-out/lib/ || echo "zig-out/lib directory not found"
           
-          echo "=== Checking target/debug/deps ==="
-          ls -la target/debug/deps/ | head -20
+          echo "=== Looking for zrraw test executables ==="
+          find target/debug/deps -name "zrraw*" | head -5
           
           # --- Find the compiled library and the test executable ---
           # The exact paths can vary slightly, so we use wildcards.

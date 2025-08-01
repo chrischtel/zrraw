@@ -19,6 +19,7 @@ jobs:
 
     # This matrix defines all the platforms we want to build for.
     strategy:
+      fail-fast: false
       matrix:
         target:
           - name: Windows x86_64
