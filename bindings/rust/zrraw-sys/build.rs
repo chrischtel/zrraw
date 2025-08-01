@@ -1,4 +1,4 @@
-// zrraw-sys/build.rs - FINAL CORRECTED VERSION
+// zrraw-sys/build.rs - FINAL OPTIMIZED VERSION
 use std::env;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -7,6 +7,8 @@ use std::path::PathBuf;
 fn main() {
     // Tell Cargo to re-run this script if it changes.
     println!("cargo:rerun-if-changed=build.rs");
+    // Also re-run if the Cargo.toml changes (for version updates)
+    println!("cargo:rerun-if-changed=Cargo.toml");
 
     let header_path: PathBuf;
 
@@ -24,54 +26,34 @@ fn main() {
 
     run_bindgen(&header_path);
 }
-/// Compiles the local Zig code into a DLL.
-fn build_from_source() {
-    use std::process::Command;
-    let zrraw_root = PathBuf::from("../../../");
-    let target = env::var("TARGET").unwrap();
-    let zig_target_str = target.replace("-pc", "");
-    let zig_target_arg = format!("-Dtarget={}", zig_target_str);
 
-    let status = Command::new("zig")
-        .args(&["build", "-Doptimize=ReleaseFast", &zig_target_arg])
-        .current_dir(&zrraw_root)
-        .status()
-        .expect("Failed to build zrraw library.");
 
-    if !status.success() {
-        panic!("Failed to build zrraw library");
-    }
-}
-
-/// Downloads the DLL from GitHub releases and places it where the executable can find it.
 fn download_precompiled_library_if_missing() -> PathBuf {
     let target = env::var("TARGET").unwrap();
     let profile = env::var("PROFILE").unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    // Determine the final destination path for the DLL/shared library
+    // 1. Determine the final paths for both the library and the header.
     let lib_name = get_dynamic_lib_name(&target);
     let final_dest_dir = out_dir.ancestors().find(|p| p.ends_with(&profile)).unwrap();
     let final_lib_path = final_dest_dir.join(lib_name);
+    let header_path = out_dir.join("zrraw.h");
 
-    // --- CACHING LOGIC ---
-    // If the library already exists in the target directory, we don't need to download it.
-    if final_lib_path.exists() {
-        println!("cargo:warning=zrraw library already exists at {}. Skipping download.", final_lib_path.display());
-    } else {
-        // If the library is missing, download the full archive and place it.
-        println!("cargo:warning=zrraw library not found. Downloading pre-compiled version...");
-        let archive_bytes = download_archive_bytes(&target);
+
+    if final_lib_path.exists() && header_path.exists() {
+        println!("cargo:warning=zrraw library and header are cached. Skipping download.");
+        return header_path;
+    }
+
+    println!("cargo:warning=zrraw artifacts missing or outdated. Downloading...");
+    let archive_bytes = download_archive_bytes(&target);
+
+    // 4. Now, check each file again and place it if it's missing.
+    if !final_lib_path.exists() {
         extract_library_from_archive(&archive_bytes, &final_dest_dir, lib_name);
     }
 
-    // --- HEADER FILE LOGIC ---
-    // Bindgen always needs the header file. We check if it's in the temporary `OUT_DIR`.
-    // If not, we extract it from a downloaded archive.
-    let header_path = out_dir.join("zrraw.h");
     if !header_path.exists() {
-        println!("cargo:warning=Header file not found. Extracting from archive...");
-        let archive_bytes = download_archive_bytes(&target);
         extract_header_from_archive(&archive_bytes, &out_dir);
     }
 
@@ -80,11 +62,13 @@ fn download_precompiled_library_if_missing() -> PathBuf {
 
 /// Downloads the release archive from GitHub and returns its content as bytes.
 fn download_archive_bytes(target: &str) -> Vec<u8> {
-    // Get version and repository URL from Cargo.toml environment variables
+    // Get version and repository URL from Cargo.toml environment variables.
+    // This removes all hardcoded values.
     let version = env!("CARGO_PKG_VERSION");
-    let repo_url = env::var("CARGO_PKG_REPOSITORY").expect("CARGO_PKG_REPOSITORY not set in Cargo.toml");
+    let repo_url = env::var("CARGO_PKG_REPOSITORY")
+        .expect("CARGO_PKG_REPOSITORY not set in Cargo.toml. Please add a 'repository' key.");
 
-    // Construct the final download URL
+    // Construct the final download URL.
     let download_url = format!(
         "{}/releases/download/v{}/zrraw-v{}-{}.zip",
         repo_url, version, version, target
@@ -104,9 +88,11 @@ fn download_archive_bytes(target: &str) -> Vec<u8> {
     bytes
 }
 
+/// Extracts the library file (dll/so/dylib) from the archive bytes to the destination.
 fn extract_library_from_archive(bytes: &[u8], dest_dir: &PathBuf, lib_name: &str) {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-    let mut library_file = archive.by_name(lib_name).expect("Library file not found in archive");
+    let mut library_file = archive.by_name(lib_name)
+        .unwrap_or_else(|_| panic!("Library file '{}' not found in archive", lib_name));
 
     let final_lib_path = dest_dir.join(lib_name);
     let mut outfile = fs::File::create(&final_lib_path).unwrap();
@@ -117,13 +103,15 @@ fn extract_library_from_archive(bytes: &[u8], dest_dir: &PathBuf, lib_name: &str
 /// Extracts the header file from the archive bytes to the destination.
 fn extract_header_from_archive(bytes: &[u8], dest_dir: &PathBuf) {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-    let mut header_file = archive.by_name("zrraw.h").expect("Header file not found in archive");
+    let mut header_file = archive.by_name("zrraw.h")
+        .expect("Header file 'zrraw.h' not found in archive");
 
     let header_path = dest_dir.join("zrraw.h");
     let mut outfile = fs::File::create(&header_path).unwrap();
     std::io::copy(&mut header_file, &mut outfile).unwrap();
 }
 
+/// Determines the correct name for the dynamic library based on the target triple.
 fn get_dynamic_lib_name(target: &str) -> &'static str {
     if target.contains("windows") {
         "zrraw.dll"
@@ -131,6 +119,25 @@ fn get_dynamic_lib_name(target: &str) -> &'static str {
         "libzrraw.dylib"
     } else {
         "libzrraw.so"
+    }
+}
+
+/// Compiles the local Zig code.
+fn build_from_source() {
+    use std::process::Command;
+    let zrraw_root = PathBuf::from("../../../");
+    let target = env::var("TARGET").unwrap();
+    let zig_target_str = target.replace("-pc", "");
+    let zig_target_arg = format!("-Dtarget={}", zig_target_str);
+
+    let status = Command::new("zig")
+        .args(&["build", "-Doptimize=ReleaseFast", &zig_target_arg])
+        .current_dir(&zrraw_root)
+        .status()
+        .expect("Failed to build zrraw library.");
+
+    if !status.success() {
+        panic!("Failed to build zrraw library");
     }
 }
 
