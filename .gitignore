@@ -1,3 +1,6 @@
 zig-out/
 .zig-cache/
 target/
+*.lock
+*.dll
+*.lib

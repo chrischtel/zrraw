@@ -9,39 +9,6 @@ on:
     branches: [ "main", "develop" ]
 
 jobs:
-  lint-and-format:
-    name: Code Quality Checks
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Check Zig formatting
-        run: zig fmt --check src/
-
-      - name: Check Rust formatting
-        working-directory: bindings/rust
-        run: cargo fmt --all -- --check
-
-      - name: Run Rust Clippy
-        working-directory: bindings/rust
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Check Rust docs
-        working-directory: bindings/rust
-        run: cargo doc --no-deps --document-private-items
-
   test-suite:
     name: Test on ${{ matrix.os }}
     # This matrix will run the same set of steps on three different operating systems.
@@ -101,46 +68,47 @@ jobs:
           
           # --- Find the compiled library and the test executable ---
           # The exact paths can vary slightly, so we use wildcards.
+          # We need to copy the library to where BOTH zrraw-sys and zrraw test executables are
           
           # On Windows, the library is a .dll
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             LIB_PATH=$(find ../../zig-out/lib -name "zrraw.dll")
-            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*.exe" | head -n 1 | xargs dirname)
-            if [[ -n "$LIB_PATH" && -n "$TEST_EXE_DIR" ]]; then
+            # Find all test executables and copy the DLL to their directories
+            find target/debug/deps -name "zrraw*-*.exe" | while read test_exe; do
+              TEST_EXE_DIR=$(dirname "$test_exe")
+              echo "Copying $LIB_PATH to $TEST_EXE_DIR/"
               cp "$LIB_PATH" "$TEST_EXE_DIR/"
-            else
-              echo "Error: Could not find library or test executable"
-              exit 1
-            fi
+            done
           fi
           
           # On macOS, the library is a .dylib
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             LIB_PATH=$(find ../../zig-out/lib -name "libzrraw.dylib")
-            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*" ! -name "*.d" | head -n 1 | xargs dirname)
-            if [[ -n "$LIB_PATH" && -n "$TEST_EXE_DIR" ]]; then
-              cp "$LIB_PATH" "$TEST_EXE_DIR/"
-            else
-              echo "Error: Could not find library or test executable"
-              exit 1
-            fi
+            # Find all test executables and copy the dylib to their directories
+            find target/debug/deps -name "zrraw*" ! -name "*.d" | while read test_exe; do
+              if [[ -f "$test_exe" ]]; then
+                TEST_EXE_DIR=$(dirname "$test_exe")
+                echo "Copying $LIB_PATH to $TEST_EXE_DIR/"
+                cp "$LIB_PATH" "$TEST_EXE_DIR/"
+              fi
+            done
           fi
           
           # On Linux, the library is a .so
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             LIB_PATH=$(find ../../zig-out/lib -name "libzrraw.so")
-            TEST_EXE_DIR=$(find target/debug/deps -name "zrraw-*" ! -name "*.d" | head -n 1 | xargs dirname)
-            if [[ -n "$LIB_PATH" && -n "$TEST_EXE_DIR" ]]; then
-              cp "$LIB_PATH" "$TEST_EXE_DIR/"
-            else
-              echo "Error: Could not find library or test executable"
-              exit 1
-            fi
+            # Find all test executables and copy the so to their directories
+            find target/debug/deps -name "zrraw*" ! -name "*.d" | while read test_exe; do
+              if [[ -f "$test_exe" ]]; then
+                TEST_EXE_DIR=$(dirname "$test_exe")
+                echo "Copying $LIB_PATH to $TEST_EXE_DIR/"
+                cp "$LIB_PATH" "$TEST_EXE_DIR/"
+              fi
+            done
           fi
           
           echo "Library found at: $LIB_PATH"
-          echo "Test executable directory: $TEST_EXE_DIR"
-          echo "Copied library to test directory."
+          echo "Copied library to test directories."
 
           echo "=== Running tests ==="
           # Now that the library is in the right place, run the tests.

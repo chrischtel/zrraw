@@ -3,7 +3,7 @@ use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
 use std::ffi::CStr;
 use thiserror::Error;
 use zrraw_sys::*;
-use libloading::{Library, Symbol}; 
+use libloading::Library; 
 
 #[derive(Error, Debug)]
 pub enum ZrRawError {

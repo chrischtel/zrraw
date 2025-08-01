@@ -50,7 +50,7 @@ fn download_precompiled_library_if_missing() -> PathBuf {
 
     // 4. Now, check each file again and place it if it's missing.
     if !final_lib_path.exists() {
-        extract_library_from_archive(&archive_bytes, &final_dest_dir, lib_name);
+        extract_library_from_archive(&archive_bytes, final_dest_dir, lib_name);
     }
 
     if !header_path.exists() {
@@ -89,7 +89,7 @@ fn download_archive_bytes(target: &str) -> Vec<u8> {
 }
 
 /// Extracts the library file (dll/so/dylib) from the archive bytes to the destination.
-fn extract_library_from_archive(bytes: &[u8], dest_dir: &PathBuf, lib_name: &str) {
+fn extract_library_from_archive(bytes: &[u8], dest_dir: &std::path::Path, lib_name: &str) {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let mut library_file = archive.by_name(lib_name)
         .unwrap_or_else(|_| panic!("Library file '{}' not found in archive", lib_name));
@@ -101,7 +101,7 @@ fn extract_library_from_archive(bytes: &[u8], dest_dir: &PathBuf, lib_name: &str
 }
 
 /// Extracts the header file from the archive bytes to the destination.
-fn extract_header_from_archive(bytes: &[u8], dest_dir: &PathBuf) {
+fn extract_header_from_archive(bytes: &[u8], dest_dir: &std::path::Path) {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let mut header_file = archive.by_name("zrraw.h")
         .expect("Header file 'zrraw.h' not found in archive");
