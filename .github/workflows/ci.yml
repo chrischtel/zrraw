@@ -36,6 +36,7 @@ jobs:
 
       # Step 3.5: Test building Zig library directly first
       - name: Test Zig library build
+        shell: bash
         run: |
           echo "=== Testing Zig library build ==="
           zig build -Doptimize=ReleaseFast
